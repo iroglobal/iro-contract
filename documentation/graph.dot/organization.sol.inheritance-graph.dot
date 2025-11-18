@@ -1,0 +1,4 @@
+digraph "" {
+c259_Organization[shape="box"label=< <TABLE border="0"><TR><TD align="center"><B>Organization</B></TD></TR><TR><TD align="left"><I>Public Functions:</I></TD></TR><TR><TD align="left"><font color="#FFA500">    getInviteList(address)</font></TD></TR><TR><TD align="left"><font color="#FFA500">    getInviteNum(address)</font></TD></TR><TR><TD align="left"><font color="#FFA500">    getIndexInvite(address,uint256)</font></TD></TR><TR><TD align="left"><font color="#FFA500">    addInvite(address)</font></TD></TR><TR><TD align="left">    isChild(address,address,uint256)</TD></TR><TR><TD align="left"><I>Private Functions:</I></TD></TR><TR><TD align="left">    isContract(address)</TD></TR><TR><TD align="left"><I>Public Variables:</I></TD></TR><TR><TD align="left">    presenter</TD></TR><TR><TD align="left">    inviteList</TD></TR></TABLE> >];
+
+}
