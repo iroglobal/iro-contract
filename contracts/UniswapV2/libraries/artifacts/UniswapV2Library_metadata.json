@@ -1,0 +1,58 @@
+{
+	"compiler": {
+		"version": "0.6.6+commit.6c089d02"
+	},
+	"language": "Solidity",
+	"output": {
+		"abi": [],
+		"devdoc": {
+			"methods": {}
+		},
+		"userdoc": {
+			"methods": {}
+		}
+	},
+	"settings": {
+		"compilationTarget": {
+			"contracts/UniswapV2/libraries/UniswapV2Library.sol": "UniswapV2Library"
+		},
+		"evmVersion": "istanbul",
+		"libraries": {},
+		"metadata": {
+			"bytecodeHash": "ipfs"
+		},
+		"optimizer": {
+			"enabled": true,
+			"runs": 200
+		},
+		"remappings": [
+			":@openzeppelin-contracts/=dependencies/@openzeppelin-contracts-5.0.2/\r",
+			":forge-std/=lib/forge-std/src/",
+			":hardhat/=node_modules/hardhat/\r"
+		]
+	},
+	"sources": {
+		"contracts/UniswapV2/interfaces/IUniswapV2Pair.sol": {
+			"keccak256": "0x2a4fae890db5c774dc1865ef8a718b65da95ba7b2475fbbdbaf4bb4e1f706371",
+			"urls": [
+				"bzz-raw://a9626561a1d5ea4522fc1bedfce975c72341d39bbbec9456e31abbd1a7b8fd81",
+				"dweb:/ipfs/Qmf5subJzn9mb48d1NrBH3tmnDK1v2JhWCYTdzuqvEKyZ3"
+			]
+		},
+		"contracts/UniswapV2/libraries/SafeMath.sol": {
+			"keccak256": "0xb819cd03b3bf322b4b935ec47ecef0fc9aa0b5686cc6658a63c799204c8cb06d",
+			"urls": [
+				"bzz-raw://f22e5988034ab3ec36f3e82092b9eba15573aef6b3da3d5dbf6aa64cd050cdcf",
+				"dweb:/ipfs/Qmav9u2vzDcZhRrMJgu1cqyK6cH61aJzWYgssxkRaX1xYd"
+			]
+		},
+		"contracts/UniswapV2/libraries/UniswapV2Library.sol": {
+			"keccak256": "0xb0882811239ee52eb5c14b9cf96603d196aad0209a324dc5b5f0a7756803e9e7",
+			"urls": [
+				"bzz-raw://91bcfc0eae29a25c35cd3c85f2bfd89ddbcd690f296901f95070b08bc3e1a495",
+				"dweb:/ipfs/QmQXhQHcVKiNZJEVBbcs6Dwx3hk7hxVMjTnXvYtvbyAgwm"
+			]
+		}
+	},
+	"version": 1
+}

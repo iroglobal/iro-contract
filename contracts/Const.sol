@@ -1,0 +1,8 @@
+//SPDX-License-Identifier: UNLICENSED
+pragma solidity 0.8.6;
+// xoc-test
+// address constant _UNISWAP_V2_ROUTER = 0x2eB1975ddA74f24C57664219EF40702e21ba40d8;
+// address constant _UNISWAP_V2_FACTORY = 0xCE0fbec27B6F2A01F6f0cdb8F0eB5E6fd82ee4bB;
+// address constant _WXOC = 0x34c2E220FC8474eFCFb2973047B82d11F97D9E25;
+// address constant _ORGANIZATION = 0x05a7dB3BD1B8012ffC847bE5608Db2b0421CFD74;
+// address constant _rootBroker = 0x4C30F98fAb525C6E1f9257AE357202f68eB3DD7c;
