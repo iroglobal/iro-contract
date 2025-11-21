@@ -180,6 +180,7 @@ contract IROOwner is Ownable, IIROOwner {
     address public override sellFeeAddress;
     uint256 public override createFee = 200 ether;
     uint256 public override brokerBuySellFeeRate = 3;
+    address public marketing;
 
     mapping(address => uint256) public override brokerMap;
     mapping(address => bool) public override tokenAMap;
@@ -192,6 +193,7 @@ contract IROOwner is Ownable, IIROOwner {
     event IncludedToFee(address account);
     event ExcludedFromFee(address token, address account);
     event IncludedToFee(address token, address account);
+    event MarketingshipTransferred(address token, address account);
 
     mapping(address => address[]) public tokenWhiteListArr;
     mapping(address => address) public override presenter;
@@ -239,15 +241,21 @@ contract IROOwner is Ownable, IIROOwner {
         _;
     }
 
+    modifier onlyMarketing() {
+        if (msg.sender != marketing) revert Err();
+        _;
+    }
+
     modifier onlyIROFactory() {
         if (msg.sender != factoryAddress) revert Err();
         _;
     }
 
-    constructor(address _feeTo, address _autoBuyFeeTo, address _contributionVault) {
+    constructor(address _feeTo, address _autoBuyFeeTo, address _contributionVault, address _marketing) {
         feeTo = _feeTo;
         autoBuyFeeTo = _autoBuyFeeTo;
         contributionVault = _contributionVault;
+        marketing = _marketing;
         levelFee[1] = 3;
         levelFee[2] = 6;
         levelFee[3] = 8;
@@ -260,6 +268,14 @@ contract IROOwner is Ownable, IIROOwner {
         brokerGroup.push(address(rootBroker));
         brokerMap[address(rootBroker)] = 4;
         _transferOwnership(_msgSender());
+    }
+
+    function transferMarketingship(address newMarketing) external onlyMarketing {
+        if (isContract(newMarketing)) revert notContract();
+        if (newMarketing == address(0)) revert NotZero();
+        address oldMarketing = marketing;
+        marketing = newMarketing;
+        emit MarketingshipTransferred(oldMarketing, newMarketing);
     }
 
     function isExcludedFromFee(address token, address account) public view override returns (bool) {
@@ -303,9 +319,7 @@ contract IROOwner is Ownable, IIROOwner {
 
     function _addTokenWhiteList(address token, address addr, uint256 quota) internal {
         if (isContract(addr)) revert notContract();
-        if (tokenWhiteListMap[token][addr].status) {
-            revert AddressAlreadyInWhiteList();
-        }
+        if (tokenWhiteListMap[token][addr].status) revert AddressAlreadyInWhiteList();
         (,,, address creator,,, bool isWhitelisted,) = IIROFactory(factoryAddress).tokenInfo(token);
         if (!isWhitelisted) revert NotWhitelisted();
         if (creator == addr) revert Err();
@@ -330,9 +344,7 @@ contract IROOwner is Ownable, IIROOwner {
     }
 
     function removeTokenWhiteList(address token, address addr) external onlyCreator(token) {
-        if (!tokenWhiteListMap[token][addr].status) {
-            revert AddressNotInWhiteList();
-        }
+        if (!tokenWhiteListMap[token][addr].status) revert AddressNotInWhiteList();
         tokenWhiteListMap[token][addr].status = false;
         tokenWhiteListMap[token][addr].quota = 0;
         for (uint256 i = 0; i < tokenWhiteListArr[token].length; i++) {
@@ -416,14 +428,14 @@ contract IROOwner is Ownable, IIROOwner {
         emit BrokerBuySellFeeRateUpdated(newRate, old);
     }
 
-    function setBroker(address _address, uint256 level, address parent) external onlyOwner {
+    function setBroker(address _address, uint256 level, address parent) external onlyMarketing {
         if (brokerMap[parent] == 0) revert Err();
         if (isContract(_address)) revert notContract();
         _setBrokerLevel(_address, level);
         addInvite(_address, parent);
     }
 
-    function setBrokerLevel(address _address, uint256 level) external onlyOwner {
+    function setBrokerLevel(address _address, uint256 level) external onlyMarketing {
         _setBrokerLevel(_address, level);
     }
 
@@ -461,7 +473,7 @@ contract IROOwner is Ownable, IIROOwner {
         return false;
     }
 
-    function setTokenA(address _address, bool status) external onlyOwner {
+    function setTokenA(address _address, bool status) external onlyMarketing {
         if (status) {
             if (tokenAMap[_address]) revert Err();
             tokenAGroup.push(_address);
