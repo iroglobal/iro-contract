@@ -13,6 +13,46 @@ abstract contract Context {
     }
 }
 
+interface IOrganization {
+    event AddInvite(address indexed presenter, address indexed account);
+    event Staked(address indexed user, uint256 amount);
+    event Unstaked(address indexed user, uint256 amount);
+    event StakeAmountUpdated(uint256 newAmount);
+
+    error addressErr();
+    error notRewrite();
+    error notContract();
+    error AlreadyStaked();
+    error NotStaked();
+    error TransferFail();
+    error InvalidToken();
+    error InvalidStakeAmount();
+
+    struct UserStake {
+        bool status;
+        uint256 amount;
+        uint256 validNum;
+    }
+
+    function getUserStake(address user) external view returns (UserStake memory);
+    function presenter(address account) external view returns (address);
+    function getInviteNum(address account) external view returns (uint256);
+    function getInviteList(address account) external view returns (address[] memory);
+    function getIndexInvite(address account, uint256 index) external view returns (address);
+
+    function addInvite(address account) external;
+}
+
+interface IROStake {
+    struct UserStake {
+        bool status;
+        uint256 amount;
+        uint256 validNum;
+    }
+
+    function getUserStake(address user) external view returns (UserStake memory);
+}
+
 abstract contract Ownable is Context {
     address private _owner;
 
@@ -67,6 +107,7 @@ interface IIROOwner {
     function brokerMap(address addr) external view returns (uint256);
     function tokenAMap(address addr) external view returns (bool);
     function levelFee(uint256 level) external view returns (uint256);
+    function isExcludedFromFee(address token, address account) external view returns (bool);
     function createFee() external view returns (uint256);
     function brokerBuySellFeeRate() external view returns (uint256);
 
@@ -103,7 +144,7 @@ interface IIROFactory {
         address coinAddr,
         uint256 pledgeDays,
         TokenWhiteListQuota[] memory _addressList
-    ) external payable returns (address pool);
+    ) external returns (address pool);
     function projectIDToken(uint256) external view returns (address);
 
     struct TokenInfo {
@@ -137,13 +178,21 @@ contract IROOwner is Ownable, IIROOwner {
     address public override autoBuyFeeTo;
     address public override contributionVault;
     address public override sellFeeAddress;
-    uint256 public override createFee = 0.1 ether;
+    uint256 public override createFee = 200 ether;
     uint256 public override brokerBuySellFeeRate = 3;
 
     mapping(address => uint256) public override brokerMap;
     mapping(address => bool) public override tokenAMap;
     mapping(uint256 => uint256) public override levelFee;
     mapping(address => mapping(address => TokenWhiteListInfo)) public tokenWhiteListMap;
+    mapping(address => mapping(address => bool)) internal _isExcludedFromFee;
+    mapping(address => address[]) public excludedFromFeeArr;
+
+    event ExcludedFromFee(address account);
+    event IncludedToFee(address account);
+    event ExcludedFromFee(address token, address account);
+    event IncludedToFee(address token, address account);
+
     mapping(address => address[]) public tokenWhiteListArr;
     mapping(address => address) public override presenter;
 
@@ -213,6 +262,35 @@ contract IROOwner is Ownable, IIROOwner {
         _transferOwnership(_msgSender());
     }
 
+    function isExcludedFromFee(address token, address account) public view override returns (bool) {
+        return _isExcludedFromFee[token][account];
+    }
+
+    function getExcludedFromFeeArr(address token) external view returns (address[] memory) {
+        return excludedFromFeeArr[token];
+    }
+
+    function excludeFromFee(address token, address account) public onlyCreator(token) {
+        if (isContract(account)) revert notContract();
+        if (_isExcludedFromFee[token][account]) revert Err();
+        _isExcludedFromFee[token][account] = true;
+        excludedFromFeeArr[token].push(account);
+        emit ExcludedFromFee(token, account);
+    }
+
+    function includeInFee(address token, address account) public onlyCreator(token) {
+        if (!_isExcludedFromFee[token][account]) revert Err();
+        _isExcludedFromFee[token][account] = false;
+        for (uint256 i = 0; i < excludedFromFeeArr[token].length; i++) {
+            if (excludedFromFeeArr[token][i] == account) {
+                excludedFromFeeArr[token][i] = excludedFromFeeArr[token][excludedFromFeeArr[token].length - 1];
+                excludedFromFeeArr[token].pop();
+                emit IncludedToFee(token, account);
+                break;
+            }
+        }
+    }
+
     function initTokenWhiteList(address token, TokenWhiteListQuota[] memory _whiteList)
         external
         override
@@ -225,7 +303,9 @@ contract IROOwner is Ownable, IIROOwner {
 
     function _addTokenWhiteList(address token, address addr, uint256 quota) internal {
         if (isContract(addr)) revert notContract();
-        if (tokenWhiteListMap[token][addr].status) revert AddressAlreadyInWhiteList();
+        if (tokenWhiteListMap[token][addr].status) {
+            revert AddressAlreadyInWhiteList();
+        }
         (,,, address creator,,, bool isWhitelisted,) = IIROFactory(factoryAddress).tokenInfo(token);
         if (!isWhitelisted) revert NotWhitelisted();
         if (creator == addr) revert Err();
@@ -250,7 +330,9 @@ contract IROOwner is Ownable, IIROOwner {
     }
 
     function removeTokenWhiteList(address token, address addr) external onlyCreator(token) {
-        if (!tokenWhiteListMap[token][addr].status) revert AddressNotInWhiteList();
+        if (!tokenWhiteListMap[token][addr].status) {
+            revert AddressNotInWhiteList();
+        }
         tokenWhiteListMap[token][addr].status = false;
         tokenWhiteListMap[token][addr].quota = 0;
         for (uint256 i = 0; i < tokenWhiteListArr[token].length; i++) {

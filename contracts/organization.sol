@@ -1,24 +1,24 @@
 //SPDX-License-Identifier: UNLICENSED
 pragma solidity 0.8.6;
 
-interface IOrganization {
-    event AddInvite(address indexed presenter, address indexed account);
+import "./Owner.sol";
 
-    error addressErr();
-    error notRewrite();
-    error notContract();
-
-    function presenter(address account) external view returns (address);
-    function getInviteNum(address account) external view returns (uint256);
-    function getInviteList(address account) external view returns (address[] memory);
-    function getIndexInvite(address account, uint256 index) external view returns (address);
-
-    function addInvite(address account) external;
-}
-
-contract Organization is IOrganization {
+contract Organization is IOrganization, Ownable {
     mapping(address => address) public override presenter;
     mapping(address => address[]) public inviteList;
+
+    uint256 public stakeAmount = 100 ether;
+
+    mapping(address => UserStake) public isStaked;
+
+    constructor() {
+        _transferOwnership(_msgSender());
+    }
+
+    modifier noContract() {
+        if (isContract(msg.sender)) revert notContract();
+        _;
+    }
 
     function getInviteList(address account) external view override returns (address[] memory) {
         return inviteList[account];
@@ -32,14 +32,16 @@ contract Organization is IOrganization {
         return inviteList[account][index];
     }
 
-    function addInvite(address account) external override {
-        if(isContract(msg.sender)) revert notContract();
-        if(isContract(account)) revert notContract();
+    function addInvite(address account) external override noContract {
+        if (isContract(account)) revert notContract();
         if (presenter[msg.sender] != address(0)) revert notRewrite();
         if (account == msg.sender || account == address(0)) revert addressErr();
         if (isChild(msg.sender, account, 10) == true) revert addressErr();
         presenter[msg.sender] = account;
         inviteList[account].push(msg.sender);
+        if (isStaked[msg.sender].status) {
+            isStaked[account].validNum += 1;
+        }
         emit AddInvite(account, msg.sender);
     }
 
@@ -52,6 +54,47 @@ contract Organization is IOrganization {
 
         return false;
     }
+
+    function getUserStake(address user) external view override returns (UserStake memory) {
+        UserStake memory userStakeInfo = isStaked[user];
+        return userStakeInfo;
+    }
+
+    function setStakeAmount(uint256 newAmount) external onlyOwner {
+        if (newAmount == 0) revert InvalidStakeAmount();
+        stakeAmount = newAmount;
+        emit StakeAmountUpdated(newAmount);
+    }
+
+    function stake() external payable noContract {
+        if (isStaked[msg.sender].status) revert AlreadyStaked();
+        if (msg.value != stakeAmount) revert InvalidStakeAmount();
+        isStaked[msg.sender].status = true;
+        isStaked[msg.sender].amount = stakeAmount;
+        if (presenter[msg.sender] != address(0)) {
+            isStaked[presenter[msg.sender]].validNum += 1;
+        }
+        emit Staked(msg.sender, stakeAmount);
+    }
+
+    function unstake() external noContract {
+        if (!isStaked[msg.sender].status) revert NotStaked();
+        isStaked[msg.sender].status = false;
+        uint256 amount = isStaked[msg.sender].amount;
+        isStaked[msg.sender].amount = 0;
+        (bool sent,) = msg.sender.call{value: amount}("");
+        if (presenter[msg.sender] != address(0)) {
+            if (isStaked[presenter[msg.sender]].validNum > 0) {
+                isStaked[presenter[msg.sender]].validNum -= 1;
+            }
+        }
+
+        if (!sent) revert TransferFail();
+
+        emit Unstaked(msg.sender, amount);
+    }
+
+    receive() external payable {}
 
     function isContract(address _addr) private view returns (bool) {
         uint32 size;
