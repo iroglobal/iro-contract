@@ -1,4 +1,4 @@
-//SPDX-License-Identifier: UNLICENSED
+// SPDX-License-Identifier: MIT
 pragma solidity 0.8.6;
 
 import "./Owner.sol";
@@ -105,7 +105,7 @@ contract IROToken is IIROToken {
     mapping(uint256 => uint256) public daySwapCount;
     mapping(uint256 => uint256) public daySwapAmount;
     mapping(address => uint256) public lastBuyBlock;
-    uint256 public lastSwapBlcokNumber;
+    uint256 public lastSwapBlockNumber;
     bool noSwapFee;
     bool isTeamFee;
     address public ownerAddr;
@@ -140,14 +140,14 @@ contract IROToken is IIROToken {
     function _updateDaySwap() internal {
         uint256 day = _currentDay();
         address pair = getPair();
-        if (pair != address(0) && daySwapCount[day] < 40 && block.number >= lastSwapBlcokNumber + 200) {
+        if (pair != address(0) && daySwapCount[day] < 40 && block.number >= lastSwapBlockNumber + 200) {
             if (daySwapCount[day] == 0) {
                 uint256 balanceTKA = isWXOC ? address(this).balance : IERC20(TKA).balanceOf(address(this));
                 daySwapAmount[day] = (balanceTKA * 375) / 1000000;
             }
             daySwapCount[day] += 1;
             _toSwapToken(daySwapAmount[day], getAutoBuyFeeReceiver());
-            lastSwapBlcokNumber = block.number;
+            lastSwapBlockNumber = block.number;
         }
     }
 
@@ -241,8 +241,8 @@ contract IROToken is IIROToken {
             transferTokenATo(IIROOwner(ownerAddr).feeTo(), TKAAmount / 100);
             uint256 level = IIROOwner(ownerAddr).brokerMap(creator);
             if (level > 0) {
-                transferTokenATo(creator, (TKAAmount * 4) / 100);
-                totalCreatorFee += ((TKAAmount * 4) / 100);
+                transferTokenATo(creator, TKAAmount * 4 / 100);
+                totalCreatorFee += (TKAAmount * 4 / 100);
             }
             tokenTKA = (TKAAmount * 40) / 100;
         }
@@ -315,9 +315,7 @@ contract IROToken is IIROToken {
         bool isToken0TKA = (token0 == TKA);
         pairTKA = isToken0TKA ? reserve0 : reserve1;
         pairToken = isToken0TKA ? reserve1 : reserve0;
-        if (pairToken > 0) {
-            newPrice = (uint256(pairTKA) * 1e18) / pairToken;
-        }
+        newPrice = pairToken > 0 ? ((uint256(pairTKA) * 1e18) / pairToken) : price;
     }
 
     function isContract(address _addr) private view returns (bool) {
@@ -378,7 +376,7 @@ contract IROToken is IIROToken {
     {
         fee = (amount * 5) / 100;
         creatorFee = amount / 100;
-        teamFee = (amount * 14) / 1000;
+        teamFee = amount * 14 / 1000;
         burnFee = fee - creatorFee - teamFee;
     }
 
@@ -388,7 +386,7 @@ contract IROToken is IIROToken {
         if (sender != pair && to != pair && !isTeamFee) {
             _updateDaySwap();
         }
-        if (sender == pair || lastBuyBlock[sender] == block.number) {
+        if (sender == pair) {
             lastBuyBlock[to] = block.number;
         }
         if (sender == pair && to != UNISWAP_V2_ROUTER && to != getAutoBuyFeeReceiver() && to != address(0) && !isOpen) {
@@ -570,10 +568,8 @@ contract IROPool is IIROPool {
         userProperty.deposit = getDeposit(user);
         userProperty.share += share;
         userProperty.debt = (userProperty.share * accShareRewards) / ENLARGE;
-        if (userProperty.lastTimestamp == 0 || pledgeDays < 90) {
-            userProperty.lastTimestamp = block.timestamp;
-        }
 
+        userProperty.lastTimestamp = _updateLastTimestamp(userProperty.pledgeNum, amount, userProperty.lastTimestamp);
         totalShare += share;
         userProperty.pledgeNum += amount;
         emit Pledge(user, amount, share);
@@ -585,15 +581,23 @@ contract IROPool is IIROPool {
         if (pair == address(0)) return 0;
         (, uint256 pairTKA,) = IROToken(token).getTokenPrice();
         uint256 totalSupply = IUniswapV2Pair(pair).totalSupply();
-        lpForUsdt = (userProperty.pledgeNum * pairTKA * 2) / totalSupply;
+        lpForUsdt = userProperty.pledgeNum * pairTKA * 2 / totalSupply;
     }
 
     function getLPValueForUSDTValue(uint256 targetTKAValue) public view returns (uint256 valueInTKA) {
         address pair = getPair();
         (, uint256 pairTKA,) = IROToken(token).getTokenPrice();
         uint256 totalSupply = IUniswapV2Pair(pair).totalSupply();
-        uint256 lpUintPrice = ((pairTKA * 10 ** 18) / totalSupply) * 2;
-        valueInTKA = (targetTKAValue / lpUintPrice) * 10 ** 18;
+        valueInTKA = (targetTKAValue * totalSupply) / (pairTKA * 2);
+    }
+
+    function _updateLastTimestamp(uint256 currentAmount, uint256 newAmount, uint256 lastTimestamp)
+        internal
+        view
+        returns (uint256)
+    {
+        if (lastTimestamp == 0) return block.timestamp;
+        return (currentAmount * lastTimestamp + newAmount * block.timestamp) / (currentAmount + newAmount);
     }
 
     function _transferAward(address from, address to, uint256 TKAAmount) internal {
@@ -604,7 +608,7 @@ contract IROPool is IIROPool {
         Award storage userProperty = userAward[from];
         if (pledgeNum > userProperty.pledgeNum) revert Excess();
         if (pledgeNum == 0) revert Err();
-        uint256 share = (pledgeNum * userProperty.share) / userProperty.pledgeNum;
+        uint256 share = pledgeNum * userProperty.share / userProperty.pledgeNum;
         userProperty.deposit = getDeposit(from);
         userProperty.share -= share;
         userProperty.debt = (userProperty.share * accShareRewards) / ENLARGE;
@@ -614,9 +618,8 @@ contract IROPool is IIROPool {
         toProperty.deposit = getDeposit(to);
         toProperty.share += share;
         toProperty.debt = (toProperty.share * accShareRewards) / ENLARGE;
-        if (toProperty.lastTimestamp == 0 || pledgeDays < 90) {
-            toProperty.lastTimestamp = block.timestamp;
-        }
+
+        toProperty.lastTimestamp = _updateLastTimestamp(toProperty.pledgeNum, pledgeNum, toProperty.lastTimestamp);
         toProperty.pledgeNum += pledgeNum;
         transferCount++;
         emit AwardTransferred(from, to, share, pledgeNum, TKAAmount, transferCount);
@@ -627,9 +630,7 @@ contract IROPool is IIROPool {
     }
 
     function transferAwards(address[] calldata recipients, uint256[] calldata TKAAmounts) external {
-        if (recipients.length != TKAAmounts.length || recipients.length > 50) {
-            revert Err();
-        }
+        if (recipients.length != TKAAmounts.length) revert Err();
         for (uint256 i = 0; i < recipients.length; i++) {
             _transferAward(msg.sender, recipients[i], TKAAmounts[i]);
         }
@@ -649,7 +650,7 @@ contract IROPool is IIROPool {
 
         uint256 keepDays = (block.timestamp - userProperty.lastTimestamp) / ONEDAY;
         uint256 rate = IIROOwner(IROToken(token).ownerAddr()).getTaxRate(keepDays, pledgeDays);
-        uint256 feeAmount = (pledgeNum * rate) / 100;
+        uint256 feeAmount = pledgeNum * rate / 100;
         uint256 userAmount = pledgeNum - feeAmount;
         userProperty.lastTimestamp = 0;
 
@@ -668,7 +669,7 @@ contract IROPool is IIROPool {
         userAward[msg.sender].totalDeposit += amount;
         TransferHelper.safeTransfer(token, msg.sender, amount);
         emit Extract(msg.sender, amount);
-        _teamReward(msg.sender, (amount * 45) / 100, true);
+        _teamReward(msg.sender, amount * 45 / 100, true);
     }
 
     function teamReward(address currentUser, uint256 totalReward, bool isExtract) external override {
@@ -681,12 +682,12 @@ contract IROPool is IIROPool {
         uint256 i = 1;
         uint256 count = 0;
         while (i < 8 && count < 50) {
-            address preAccount = IOrganization(_ORGANIZATION).presenter(currentUser);
+            address preAccount = IOrganization(ORGANIZATION).presenter(currentUser);
             if (preAccount == address(0)) break;
-            IOrganization.UserStake memory preAccountInfo = IOrganization(_ORGANIZATION).getUserStake(preAccount);
+            IOrganization.UserStake memory preAccountInfo = IOrganization(ORGANIZATION).getUserStake(preAccount);
             if (preAccountInfo.status) {
                 if (preAccountInfo.validNum >= i) {
-                    uint256 reward = (totalReward * (isExtract ? proxyRatios[i - 1] : 140)) / 1000;
+                    uint256 reward = totalReward * (isExtract ? proxyRatios[i - 1] : 140) / 1000;
                     TransferHelper.safeTransfer(token, preAccount, reward);
                     burnReward -= reward;
                     if (isExtract) {
@@ -790,7 +791,7 @@ contract IROFactory is IIROFactory {
         if (!IIROOwner(ownerAddr).tokenAMap(coinAddr)) revert ErrCoinAddr();
         if (projectIDToken[projectID] != address(0)) revert IdExisted();
         IERC20(USDT).transferFrom(msg.sender, IIROOwner(ownerAddr).feeTo(), IIROOwner(ownerAddr).createFee());
-        if (softAndHardCap[1] < softAndHardCap[0]) revert Err();
+        if (softAndHardCap[1] < softAndHardCap[0] || _initPrice == 0) revert Err();
         IROToken FDT = new IROToken();
         address tokenAddress = address(FDT);
         allToken.push(tokenAddress);
@@ -801,7 +802,6 @@ contract IROFactory is IIROFactory {
         }
         pools[tokenAddress] = poolAddress;
         projectIDToken[projectID] = tokenAddress;
-
         tokenInfo[tokenAddress] = TokenInfo(
             _symbol,
             _totalSupply,
@@ -827,6 +827,7 @@ contract IROSellFeeContract is Ownable {
     mapping(address => mapping(uint256 => bool)) dayClaim;
 
     event Claim(address indexed creator, address indexed token, uint256 bal, uint256 amount);
+    event OwnerContractUpdated(address indexed oldOwnerContract, address indexed newOwnerContract);
 
     error Err();
 
@@ -835,7 +836,9 @@ contract IROSellFeeContract is Ownable {
     }
 
     function setOwnerContract(address _ownerContract) external onlyOwner {
+        address oldOwner = ownerContract;
         ownerContract = _ownerContract;
+        emit OwnerContractUpdated(oldOwner, _ownerContract);
     }
 
     function _currentDay() internal view returns (uint256) {
@@ -850,7 +853,7 @@ contract IROSellFeeContract is Ownable {
         if (dayClaim[token][day]) revert Err();
         if (!dayClaim[token][day]) {
             dayClaim[token][day] = true;
-            uint256 amount = (bal * IIROOwner(ownerContract).brokerBuySellFeeRate()) / 100;
+            uint256 amount = bal * IIROOwner(ownerContract).brokerBuySellFeeRate() / 100;
             address user = IIROToken(token).creator();
             uint256 totalFeeRate = 10;
             uint256 level = IIROOwner(ownerContract).brokerMap(user);
@@ -865,7 +868,7 @@ contract IROSellFeeContract is Ownable {
                     totalFeeRate -= levelFeeRate;
                     preRate = levelFee;
                     if (levelFeeRate > 0) {
-                        uint256 brokerFee = (amount * levelFeeRate) / 10;
+                        uint256 brokerFee = amount * levelFeeRate / 10;
                         IIROToken(token).transfer(user, brokerFee);
                         emit Claim(user, token, bal, brokerFee);
                     }
@@ -879,8 +882,8 @@ contract IROSellFeeContract is Ownable {
                 parentLevel = IIROOwner(ownerContract).brokerMap(user);
             }
             if (totalFeeRate > 0) {
-                IIROToken(token).transfer(address(0), (amount * totalFeeRate) / 10);
-                emit Claim(address(0), token, bal, (amount * totalFeeRate) / 10);
+                IIROToken(token).transfer(address(0), amount * totalFeeRate / 10);
+                emit Claim(address(0), token, bal, amount * totalFeeRate / 10);
             }
         }
     }

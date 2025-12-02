@@ -1,4 +1,4 @@
-//SPDX-License-Identifier: UNLICENSED
+// SPDX-License-Identifier: MIT
 pragma solidity 0.8.6;
 
 import {_rootBroker} from "./Const.sol";
@@ -216,6 +216,7 @@ contract IROOwner is Ownable, IIROOwner {
     event CreateFeeUpdated(uint256 newCreateFee, uint256 oldCreateFee);
     event BrokerBuySellFeeRateUpdated(uint256 newFeeRate, uint256 oldFeeRate);
     event AddInvite(address indexed presenter, address indexed account);
+    event LevelFeeUpdated(uint256 indexed level, uint256 oldFee, uint256 newFee);
 
     error NotWhitelist();
     error InvalidLevel();
@@ -494,7 +495,11 @@ contract IROOwner is Ownable, IIROOwner {
     function setLevelFee(uint256 level, uint256 _fee) external onlyOwner {
         if (level == 0 || level > 4) revert InvalidLevel();
         if (_fee > 10 || _fee < 3) revert FeeError();
+
+        uint256 oldFee = levelFee[level];
         levelFee[level] = _fee;
+
+        emit LevelFeeUpdated(level, oldFee, _fee);
     }
 
     function setIROFactoryAddress(address _factoryAddress) external onlyOwner {
