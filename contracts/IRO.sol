@@ -44,7 +44,6 @@ interface IUniswapV2Router {
 }
 
 interface IUniswapV2Pair {
-    function sync() external;
     function getReserves() external view returns (uint112 reserve0, uint112 reserve1, uint32 blockTimestampLast);
     function token0() external view returns (address);
     function approve(address spender, uint256 value) external returns (bool);
@@ -67,6 +66,7 @@ interface IIROToken is IERC20 {
     error notContract();
     error Err();
 
+    function decimals() external override view returns (uint8);
     function name() external view returns (string memory);
     function symbol() external view returns (string memory);
     function tradingLimit() external view returns (uint256);
@@ -85,7 +85,7 @@ interface IIROToken is IERC20 {
 contract IROToken is IIROToken {
     string public override name;
     string public override symbol;
-    uint8 public constant decimals = 18;
+    uint8 public constant override decimals = 18;
     uint256 public override totalSupply;
     uint256 public override tradingLimit;
     address public override creator;
@@ -93,7 +93,7 @@ contract IROToken is IIROToken {
     bool public override isOpen;
     bool public override isWhitelisted;
     uint256 public totalCreatorFee;
-    uint256 public pledgeDays;
+    uint256 pledgeDays;
 
     address constant UNISWAP_V2_ROUTER = _UNISWAP_V2_ROUTER;
     address constant UNISWAP_V2_FACTORY = _UNISWAP_V2_FACTORY;
@@ -103,7 +103,7 @@ contract IROToken is IIROToken {
     mapping(address => mapping(address => uint256)) allowances;
     mapping(uint256 => bool) public override dayProduce;
     mapping(uint256 => uint256) public daySwapCount;
-    mapping(uint256 => uint256) public daySwapAmount;
+    mapping(uint256 => uint256)  daySwapAmount;
     mapping(address => uint256) public lastBuyBlock;
     uint256 public lastSwapBlockNumber;
     bool noSwapFee;
@@ -113,9 +113,10 @@ contract IROToken is IIROToken {
     bool public TKAAboveSoftCap;
     uint256 private unlocked = 1;
     bool public override isWXOC;
-    address public FACTORY;
+    address FACTORY;
     address public POOL;
     address public TKA;
+    uint8 TKADecimals = 18;
 
     modifier lock() {
         require(unlocked == 1, "LOCKED");
@@ -146,7 +147,9 @@ contract IROToken is IIROToken {
                 daySwapAmount[day] = (balanceTKA * 375) / 1000000;
             }
             daySwapCount[day] += 1;
-            _toSwapToken(daySwapAmount[day], getAutoBuyFeeReceiver());
+
+            address autoBuyReceiver = IIROOwner(ownerAddr).autoBuyFeeTo();
+            _toSwapToken(daySwapAmount[day], autoBuyReceiver);
             lastSwapBlockNumber = block.number;
         }
     }
@@ -165,14 +168,20 @@ contract IROToken is IIROToken {
         emit Transfer(address(0), address(this), totalSupply);
         TKA = _TKA;
         POOL = _POOL;
-        this.transfer(_POOL, (totalSupply * 20) / 100);
-        this.transfer(getContributionVault(), (totalSupply * 40) / 100);
         isWXOC = WXOC == TKA;
-        IIROPool(POOL).initialize(UNISWAP_V2_FACTORY, TKA, price, pledgeDays);
         allowances[address(this)][address(UNISWAP_V2_ROUTER)] = type(uint256).max;
         if (!isWXOC) {
             IERC20(TKA).approve(address(UNISWAP_V2_ROUTER), type(uint256).max);
+            TKADecimals = IERC20(TKA).decimals();
         }
+        if (TKADecimals < 18) {
+            price = price * (10 ** (18 - TKADecimals));
+        }
+
+        this.transfer(_POOL, (totalSupply * 20) / 100);
+        (, , , address contributionVaultAddr, ) = IIROOwner(ownerAddr).getCoreAddresses();
+        this.transfer(contributionVaultAddr, (totalSupply * 40) / 100);
+        IIROPool(POOL).initialize(UNISWAP_V2_FACTORY, TKA, price, pledgeDays);
     }
 
     function balanceOf(address account) external view override returns (uint256 balance) {
@@ -205,14 +214,6 @@ contract IROToken is IIROToken {
         success = true;
     }
 
-    function getAutoBuyFeeReceiver() internal view returns (address) {
-        return IIROOwner(ownerAddr).autoBuyFeeTo();
-    }
-
-    function getContributionVault() internal view returns (address) {
-        return IIROOwner(ownerAddr).contributionVault();
-    }
-
     function transferTokenATo(address to, uint256 amount) internal {
         if (isWXOC) {
             payable(to).transfer(amount);
@@ -224,44 +225,55 @@ contract IROToken is IIROToken {
     function subscribe(address _user, uint256 amount) external payable override lock {
         if (isContract(msg.sender) || isContract(_user)) revert notContract();
         if (isOpen) revert isOpened();
-        if (isWhitelisted && !IIROOwner(ownerAddr).getTokenWhiteListInfo(address(this), msg.sender).status) {
+        IIROOwner owner = IIROOwner(ownerAddr);
+        if (isWhitelisted && !owner.getTokenWhiteListInfo(address(this), msg.sender).status) {
             revert noPermission();
         }
         verifyAmount(amount);
         uint256 TKAAmount = amount;
         uint256 balanceToken = balances[address(this)];
         (,, uint256 tokenPrice) = getTokenPrice();
-        uint256 balanceTokenTKA = (balanceToken * tokenPrice * 100) / 40 / 10 ** 18;
+        uint256 e18 = 1e18;
+        uint256 tkaDecimals = 10 ** TKADecimals;
+
+        uint256 balanceTokenTKA = ((balanceToken * tokenPrice / e18) * tkaDecimals * 100) / (40 * e18);
         if (balanceTokenTKA < TKAAmount) {
-            transferTokenATo(msg.sender, TKAAmount - balanceTokenTKA);
+            unchecked {
+                transferTokenATo(msg.sender, TKAAmount - balanceTokenTKA);
+            }
             TKAAmount = balanceTokenTKA;
         }
+
+        (address feeTo, , , , address autoBuyReceiver) = owner.getCoreAddresses();
+
         uint256 tokenTKA;
         {
-            transferTokenATo(IIROOwner(ownerAddr).feeTo(), TKAAmount / 100);
-            uint256 level = IIROOwner(ownerAddr).brokerMap(creator);
+            transferTokenATo(feeTo, TKAAmount / 100);
+            uint256 level = owner.brokerMap(creator);
             if (level > 0) {
-                transferTokenATo(creator, TKAAmount * 4 / 100);
-                totalCreatorFee += (TKAAmount * 4 / 100);
+                uint256 creatorFee = TKAAmount * 4 / 100;
+                transferTokenATo(creator, creatorFee);
+                totalCreatorFee += creatorFee;
             }
             tokenTKA = (TKAAmount * 40) / 100;
         }
-        uint256 tokenAmount = (tokenTKA * 10 ** 18) / tokenPrice;
+        uint256 tokenAmount = ((tokenTKA * e18 / tkaDecimals) * e18) / tokenPrice;
 
         if (tokenAmount > balanceToken) {
             tokenAmount = balanceToken;
         }
 
-        uint256 swapAmount = (TKAAmount * 15) / 100;
         noSwapFee = true;
         if (isWhitelisted) {
-            IIROOwner(ownerAddr).decreaseQuota(msg.sender, TKAAmount);
+            owner.decreaseQuota(msg.sender, TKAAmount);
         }
 
         _toAddLP(_user, TKAAmount, tokenTKA, tokenAmount);
 
         if (TKAAboveSoftCap) {
-            _toSwapToken(swapAmount, getAutoBuyFeeReceiver());
+            unchecked {
+                _toSwapToken((TKAAmount * 15) / 100, autoBuyReceiver);
+            }
         }
 
         noSwapFee = false;
@@ -276,7 +288,9 @@ contract IROToken is IIROToken {
         uint256 bal = balances[address(this)];
         if (bal < 1 * 10 ** 18 || pairTKA >= tradingLimit) {
             isOpen = true;
-            _transfer(address(this), getContributionVault(), bal);
+
+            (, , , address contributionVaultAddr, ) = IIROOwner(ownerAddr).getCoreAddresses();
+            _transfer(address(this), contributionVaultAddr, bal);
             emit OpenSwap(block.timestamp, bal);
         }
     }
@@ -315,7 +329,14 @@ contract IROToken is IIROToken {
         bool isToken0TKA = (token0 == TKA);
         pairTKA = isToken0TKA ? reserve0 : reserve1;
         pairToken = isToken0TKA ? reserve1 : reserve0;
-        newPrice = pairToken > 0 ? ((uint256(pairTKA) * 1e18) / pairToken) : price;
+        if (pairToken == 0) {
+            return (pairToken, pairTKA, price);
+        }
+        if (TKADecimals == 18) {
+            newPrice = (uint256(pairTKA) * 1e18) / pairToken;
+        } else {
+            newPrice = uint256(pairTKA) * 1e18 * 1e18 / (uint256(pairToken) * (10 ** TKADecimals));
+        }
     }
 
     function isContract(address _addr) private view returns (bool) {
@@ -372,24 +393,28 @@ contract IROToken is IIROToken {
     function getSwapFee(uint256 amount)
         internal
         pure
-        returns (uint256 fee, uint256 burnFee, uint256 creatorFee, uint256 teamFee)
+        returns (uint256 fee, uint256 daoFee, uint256 creatorFee, uint256 teamFee)
     {
-        fee = (amount * 5) / 100;
+        fee = (amount * 3) / 100;
         creatorFee = amount / 100;
         teamFee = amount * 14 / 1000;
-        burnFee = fee - creatorFee - teamFee;
+        daoFee = fee - creatorFee - teamFee;
     }
 
     function _transfer(address sender, address to, uint256 amount) internal {
         _updateDayProduce();
         address pair = getPair();
-        if (sender != pair && to != pair && !isTeamFee) {
+        if (sender != pair && to != pair && !isTeamFee && !noSwapFee) {
             _updateDaySwap();
         }
         if (sender == pair) {
             lastBuyBlock[to] = block.number;
         }
-        if (sender == pair && to != UNISWAP_V2_ROUTER && to != getAutoBuyFeeReceiver() && to != address(0) && !isOpen) {
+
+        IIROOwner owner = IIROOwner(ownerAddr);
+        (address feeTo, address sellFeeAddr, address daoAddr, , address autoBuyReceiver) = owner.getCoreAddresses();
+
+        if (sender == pair && to != UNISWAP_V2_ROUTER && to != autoBuyReceiver && to != address(0) && !isOpen) {
             balances[sender] -= amount;
             balances[address(0)] += amount;
             emit Transfer(sender, address(0), amount);
@@ -397,26 +422,24 @@ contract IROToken is IIROToken {
         }
 
         if (
-            (to == pair || sender == pair) && !noSwapFee && to != getAutoBuyFeeReceiver()
-                && (
-                    !IIROOwner(ownerAddr).isExcludedFromFee(address(this), sender)
-                        && !IIROOwner(ownerAddr).isExcludedFromFee(address(this), to)
-                )
+            (to == pair || sender == pair) && !noSwapFee && to != autoBuyReceiver
+                && (!owner.isExcludedFromFee(address(this), sender)
+                    && !owner.isExcludedFromFee(address(this), to))
         ) {
             if (block.number <= lastBuyBlock[sender]) revert Err();
-            (uint256 fee, uint256 burnFee, uint256 creatorFee, uint256 teamFee) = getSwapFee(amount);
+            (uint256 fee, uint256 daoFee, uint256 creatorFee, uint256 teamFee) = getSwapFee(amount);
             amount -= fee;
             balances[sender] -= fee;
-            balances[address(0)] += burnFee;
-            emit Transfer(sender, address(0), burnFee);
+            balances[daoAddr] += daoFee;
+            emit Transfer(sender, daoAddr, daoFee);
             address currentUser = to == pair ? sender : to;
             balances[POOL] += teamFee;
             emit Transfer(sender, POOL, teamFee);
             isTeamFee = true;
             IIROPool(POOL).teamReward(currentUser, teamFee, false);
             isTeamFee = false;
-            balances[IIROOwner(ownerAddr).sellFeeAddress()] += creatorFee;
-            emit Transfer(sender, IIROOwner(ownerAddr).sellFeeAddress(), creatorFee);
+            balances[sellFeeAddr] += creatorFee;
+            emit Transfer(sender, sellFeeAddr, creatorFee);
         }
 
         balances[sender] -= amount;
@@ -455,10 +478,6 @@ interface IIROPool {
     error notContract();
     error Err();
 
-    function getUserInfo(address account)
-        external
-        view
-        returns (uint256, uint256, uint256, uint256, uint256, uint256);
     function getDeposit(address account) external view returns (uint256);
     function increaseRateMap(uint256) external view returns (bool status, uint256 rate);
     function produceNum() external view returns (uint256);
@@ -469,7 +488,6 @@ interface IIROPool {
 
     function initialize(address _uniswapFactory, address _TKA, uint256 initPrice, uint256 pledgeDays) external;
     function pledge(address _user, uint256 amount, uint256 share) external;
-    function transferAward(address to, uint256 TKAAmount) external;
     function removePledge() external;
     function extract(uint256 amount) external;
     function addProduceNum() external;
@@ -487,7 +505,7 @@ contract IROPool is IIROPool {
     uint256 public override lastAddProduce;
     address payable token;
     uint256 public override lastPrice;
-    uint256 public transferCount;
+    uint256 transferCount;
     address constant ORGANIZATION = _ORGANIZATION;
 
     uint256 constant ONEDAY = 1 days;
@@ -498,7 +516,7 @@ contract IROPool is IIROPool {
 
     mapping(address => Award) public userAward;
     mapping(uint256 => Rate) public override increaseRateMap;
-    uint256[7] public proxyRatios = [200, 155, 112, 66, 112, 155, 200];
+    uint256[7] proxyRatios = [200, 155, 112, 66, 112, 155, 200];
 
     struct Rate {
         bool status;
@@ -530,27 +548,6 @@ contract IROPool is IIROPool {
         produceLimit = IIROToken(token).balanceOf(address(this));
         uniswapV2Factory = _uniswapFactory;
         TKA = _TKA;
-    }
-
-    function getUserInfo(address account)
-        external
-        view
-        override
-        returns (uint256, uint256, uint256, uint256, uint256, uint256)
-    {
-        Award memory userInfo = userAward[account];
-        return (
-            userInfo.share,
-            userInfo.totalDeposit,
-            userInfo.totalInviteReward,
-            userInfo.lastInviteReward,
-            userInfo.lastTimestamp,
-            userInfo.pledgeNum
-        );
-    }
-
-    function getUserAllInfo(address account) external view returns (Award memory) {
-        return userAward[account];
     }
 
     function getDeposit(address account) public view override returns (uint256) {
@@ -623,10 +620,6 @@ contract IROPool is IIROPool {
         toProperty.pledgeNum += pledgeNum;
         transferCount++;
         emit AwardTransferred(from, to, share, pledgeNum, TKAAmount, transferCount);
-    }
-
-    function transferAward(address to, uint256 TKAAmount) external override {
-        _transferAward(msg.sender, to, TKAAmount);
     }
 
     function transferAwards(address[] calldata recipients, uint256[] calldata TKAAmounts) external {
@@ -824,7 +817,7 @@ contract IROFactory is IIROFactory {
 
 contract IROSellFeeContract is Ownable {
     address public ownerContract;
-    mapping(address => mapping(uint256 => bool)) dayClaim;
+    mapping(address => mapping(uint256 => bool)) public dayClaim;
 
     event Claim(address indexed creator, address indexed token, uint256 bal, uint256 amount);
     event OwnerContractUpdated(address indexed oldOwnerContract, address indexed newOwnerContract);

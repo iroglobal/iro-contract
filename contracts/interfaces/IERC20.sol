@@ -13,6 +13,7 @@ interface IERC20 {
      */
     event Transfer(address indexed from, address indexed to, uint256 value);
 
+    function decimals() external view returns (uint8);
     /**
      * @dev Emitted when the allowance of a `spender` for an `owner` is set by
      * a call to {approve}. `value` is the new allowance.

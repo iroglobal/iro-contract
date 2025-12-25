@@ -104,6 +104,7 @@ interface IIROOwner {
     function autoBuyFeeTo() external view returns (address);
     function contributionVault() external view returns (address);
     function sellFeeAddress() external view returns (address);
+    function daoAddress() external view returns (address);
     function brokerMap(address addr) external view returns (uint256);
     function tokenAMap(address addr) external view returns (bool);
     function levelFee(uint256 level) external view returns (uint256);
@@ -125,6 +126,14 @@ interface IIROOwner {
     function getTokenWhiteListInfo(address token, address addr) external view returns (TokenWhiteListInfo memory);
     function getTaxRate(uint256 stakeDay, uint256 pledgeDays) external view returns (uint256);
     function presenter(address account) external view returns (address);
+
+    function getCoreAddresses() external view returns (
+        address _feeTo,
+        address _sellFeeAddress,
+        address _daoAddress,
+        address _contributionVault,
+        address _autoBuyFeeTo
+    );
 }
 
 interface IIROFactory {
@@ -178,9 +187,10 @@ contract IROOwner is Ownable, IIROOwner {
     address public override autoBuyFeeTo;
     address public override contributionVault;
     address public override sellFeeAddress;
-    uint256 public override createFee = 200 ether;
+    uint256 public override createFee = 1 * 10 ** 6;
     uint256 public override brokerBuySellFeeRate = 3;
     address public marketing;
+    address public override daoAddress;
 
     mapping(address => uint256) public override brokerMap;
     mapping(address => bool) public override tokenAMap;
@@ -217,6 +227,7 @@ contract IROOwner is Ownable, IIROOwner {
     event BrokerBuySellFeeRateUpdated(uint256 newFeeRate, uint256 oldFeeRate);
     event AddInvite(address indexed presenter, address indexed account);
     event LevelFeeUpdated(uint256 indexed level, uint256 oldFee, uint256 newFee);
+    event DaoAddressUpdated(address indexed newDaoAddress, address indexed oldDaoAddress);
 
     error NotWhitelist();
     error InvalidLevel();
@@ -512,6 +523,23 @@ contract IROOwner is Ownable, IIROOwner {
         uint256 old = createFee;
         createFee = _createFee;
         emit CreateFeeUpdated(_createFee, old);
+    }
+
+    function setDaoAddress(address _daoAddress) external onlyOwner {
+        if (_daoAddress == address(0)) revert NotZero();
+        address old = daoAddress;
+        daoAddress = _daoAddress;
+        emit DaoAddressUpdated(_daoAddress, old);
+    }
+
+    function getCoreAddresses() external override view returns (
+        address _feeTo,
+        address _sellFeeAddress,
+        address _daoAddress,
+        address _contributionVault,
+        address _autoBuyFeeTo
+    ) {
+        return (feeTo, sellFeeAddress, daoAddress, contributionVault, autoBuyFeeTo);
     }
 
     function isContract(address _addr) private view returns (bool) {
