@@ -2,16 +2,20 @@
 pragma solidity 0.8.6;
 
 import "./Owner.sol";
+import "./interfaces/IERC20.sol";
 
 contract Organization is IOrganization, Ownable {
     mapping(address => address) public override presenter;
     mapping(address => address[]) public inviteList;
 
     uint256 public stakeAmount = 100 ether;
+    IERC20 public stakeToken;
 
     mapping(address => UserStake) public isStaked;
 
-    constructor() {
+    constructor(address _stakeToken) {
+        require(_stakeToken != address(0), "Invalid token address");
+        stakeToken = IERC20(_stakeToken);
         _transferOwnership(_msgSender());
     }
 
@@ -66,9 +70,12 @@ contract Organization is IOrganization, Ownable {
         emit StakeAmountUpdated(newAmount);
     }
 
-    function stake() external payable noContract {
+    function stake() external noContract {
         if (isStaked[msg.sender].status) revert AlreadyStaked();
-        if (msg.value != stakeAmount) revert InvalidStakeAmount();
+
+        bool success = stakeToken.transferFrom(msg.sender, address(this), stakeAmount);
+        if (!success) revert TransferFail();
+
         isStaked[msg.sender].status = true;
         isStaked[msg.sender].amount = stakeAmount;
         if (presenter[msg.sender] != address(0)) {
@@ -82,19 +89,18 @@ contract Organization is IOrganization, Ownable {
         isStaked[msg.sender].status = false;
         uint256 amount = isStaked[msg.sender].amount;
         isStaked[msg.sender].amount = 0;
-        (bool sent,) = msg.sender.call{value: amount}("");
+
         if (presenter[msg.sender] != address(0)) {
             if (isStaked[presenter[msg.sender]].validNum > 0) {
                 isStaked[presenter[msg.sender]].validNum -= 1;
             }
         }
 
-        if (!sent) revert TransferFail();
+        bool success = stakeToken.transfer(msg.sender, amount);
+        if (!success) revert TransferFail();
 
         emit Unstaked(msg.sender, amount);
     }
-
-    receive() external payable {}
 
     function isContract(address _addr) private view returns (bool) {
         uint32 size;
